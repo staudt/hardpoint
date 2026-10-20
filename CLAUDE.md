@@ -118,7 +118,7 @@ The user loved the hills. The reference shows:
 - **HUD:** objectives panel at top right (concept-art style), radar at bottom centre (rotates with the view; shows the legs heading), mission-failed screen. The FPS counter moved under the title.
 - **Performance:** mech paint is baked into vertex colours (`mergeByMaterial` in `kit.ts`): one mesh per joint plus emissive parts. That's about 40% fewer draw calls (a single mech went from 97 to 51).
 - **Fix:** mech movement measures climbable grade over a 4 m look-ahead (`LOOKAHEAD` in `mech.ts`), so mechs step over small bumps instead of sticking on them.
-- **No commits and no GitHub remote yet.** Ask the user before committing, running `gh repo create hardpoint` or pushing.
+- **Repo:** https://github.com/staudt/hardpoint (public, branch `main`). **Live build:** https://staudt.github.io/hardpoint/, deployed by `.github/workflows/deploy.yml` on every push to `main` after CI passes. The user approved committing and pushing on 2026-10-20; still confirm before force-pushes or other destructive git operations.
 
 ## Next steps
 1. **Get the user's feedback** on AI difficulty, wave pacing, heat and sound.
@@ -134,6 +134,7 @@ The user loved the hills. The reference shows:
    - Removing old wrecks after a while (perf in long sessions).
 
 ## Known issues
+- CI notice: the actions/checkout, setup-node and upload-artifact v4 actions target Node 20, which GitHub now forces onto Node 24. They still work; bump the action major versions when convenient.
 - `vite build` warns that the chunk is about 580 kB (Three.js). Acceptable for now.
 - Distant canyon wall tops are still slightly jagged from LOD aliasing. Max-filtered sampling for coarse LODs would fix it if needed.
 - Draw calls: one mesh per chunk LOD. Merge them if performance requires.
