@@ -1,0 +1,8 @@
+node_modules
+dist
+shots
+test-results
+playwright-report
+.claude/.verify-hash
+.claude/settings.local.json
+*.log
