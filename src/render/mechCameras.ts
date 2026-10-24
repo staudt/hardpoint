@@ -62,7 +62,11 @@ export function aimPoint(view: MechView, controller: PlayerController, distance:
   return out;
 }
 
-/** First-person cockpit camera rigidly attached to the torso, with footfall shake. */
+/**
+ * First-person cockpit camera rigidly attached to the torso. It inherits the body's
+ * stride bob, sway and hit reel; on top of that each landing dips the nose, as the
+ * cockpit's weight carries on after the foot stops.
+ */
 export class CockpitRig implements CameraRig {
   constructor(private readonly view: MechView) {}
 
@@ -71,8 +75,8 @@ export class CockpitRig implements CameraRig {
     cockpit.updateWorldMatrix(true, false);
     cockpit.getWorldPosition(camera.position);
     cockpit.getWorldQuaternion(camera.quaternion);
-    const shake = this.view.gait.impact;
-    camera.position.y -= shake * 0.25;
-    camera.rotateX(-shake * 0.02);
+    const impact = this.view.gait.impact;
+    camera.position.y -= impact * 0.2;
+    camera.rotateX(-impact * 0.12);
   }
 }

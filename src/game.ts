@@ -76,7 +76,9 @@ export class Game {
   private hud!: Hud;
   private readonly cockpitFrame: HTMLDivElement;
   private readonly fps: FpsCounter;
-  private mode: CameraMode = 'chase';
+  private mode: CameraMode = 'cockpit';
+  /** Last piloting view (cockpit or chase), restored after the free camera or a respawn. */
+  private pilotMode: CameraMode = 'cockpit';
   private rig!: CameraRig;
   private frozen = false;
   private lastFrame = 0;
@@ -156,7 +158,8 @@ export class Game {
     this.player = this.world.spawnMech(this.chassis, spawn.x, spawn.z, 0, 0);
     this.playerView = this.addView(this.player);
     this.playerView.gait.onFootfall = (_i, strength) => {
-      this.shake = Math.max(this.shake, strength * 0.15);
+      // The weight comes from the gait's landing spring; this is just the rattle of the frame.
+      this.shake = Math.max(this.shake, strength * 0.06);
       this.sfx.play(this.chassis.tonnage >= 70 ? 'footstep_heavy' : 'footstep_medium', undefined, { volume: 0.5 + strength * 0.5 });
     };
     this.controller = new PlayerController(this.input, this.player, this.world);
@@ -194,6 +197,7 @@ export class Game {
 
   private setMode(mode: CameraMode): void {
     this.mode = mode;
+    if (mode === 'chase' || mode === 'cockpit') this.pilotMode = mode;
     const bf = this.battlefield;
     const pv = this.playerView;
     const ground = (x: number, z: number): number => bf.heightAt(x, z);
@@ -280,7 +284,7 @@ export class Game {
   private render(alpha: number, frameSeconds: number): void {
     const input = this.input;
     if (input.consumePress('toggleView')) this.setMode(this.mode === 'chase' ? 'cockpit' : 'chase');
-    if (input.consumePress('cycleCamera')) this.setMode(this.mode === 'free' ? 'chase' : 'free');
+    if (input.consumePress('cycleCamera')) this.setMode(this.mode === 'free' ? this.pilotMode : 'free');
     if (input.consumePress('toggleStats')) this.fps.toggle();
     if (input.consumePress('mute')) this.sfx.muted = !this.sfx.muted;
     if (input.consumePress('respawn') && !this.player.combat.alive) {
@@ -289,7 +293,7 @@ export class Game {
         return;
       }
       this.spawnPlayer();
-      this.setMode(this.mode === 'cockpit' ? 'cockpit' : 'chase');
+      this.setMode(this.pilotMode);
     }
     const piloting = this.mode === 'chase' || this.mode === 'cockpit';
     if (piloting) this.controller.look();
@@ -349,8 +353,8 @@ export class Game {
     const integrity = this.totalIntegrity();
     this.hitSoundTimer -= dt;
     if (integrity < this.lastIntegrity - 1e-6) {
+      // No shake here: lasers push (the sim's reel), only impacts jolt (see onCombatEvent).
       const lost = this.lastIntegrity - integrity;
-      this.shake = Math.max(this.shake, Math.min(1.2, 0.2 + lost * 0.08));
       if (this.hitSoundTimer <= 0) {
         this.sfx.play('hit_taken', undefined, { volume: Math.min(1, 0.4 + lost * 0.1) });
         this.hitSoundTimer = 0.15;
@@ -396,9 +400,17 @@ export class Game {
         if (isPlayer && (w.delivery === 'shell' || w.delivery === 'bolt')) this.shake = Math.max(this.shake, w.damage * 0.02);
         break;
       }
-      case 'impact':
+      case 'impact': {
         this.sfx.play(e.damage >= 8 ? 'impact_large' : 'impact_small', new THREE.Vector3(e.x, e.y, e.z), { volume: e.weaponId === 'mg' ? 0.3 : 1 });
+        if (!isPlayer || e.damage <= 0) break;
+        // Hits on us: missiles are explosions slamming the cockpit (a volley stacks up);
+        // shells and bolts a hard single knock; MG rounds a rattle.
+        const kind = getWeapon(e.weaponId).delivery;
+        if (kind === 'srm' || kind === 'lrm') this.shake = Math.min(1.4, this.shake + 0.12 + e.damage * 0.08);
+        else if (kind === 'stream') this.shake = Math.max(this.shake, 0.08);
+        else this.shake = Math.max(this.shake, Math.min(1.2, 0.2 + e.damage * 0.04));
         break;
+      }
       case 'locDestroyed': {
         const m = this.world.getMech(e.mechId);
         if (m) this.sfx.play('impact_large', this.posOf(m));

@@ -50,7 +50,7 @@ The user loved the hills. The reference shows:
 - Walking is code-driven: phase-based gait, foot planting, two-joint leg IK to the terrain, body bob.
 
 ## URL params (dev, tests, screenshots)
-`?scene=desert|test|viewer&seed=<int>&mech=ironclaw|warden&cam=chase|cockpit|orbit|free&t=<seconds>&walk=<-1..1>&turn=<rad/s>&fire=<group mask>&mode=instant|range|none&pos=x,y,z&look=x,y,z&debug=1`
+`?scene=desert|test|viewer&seed=<int>&mech=ironclaw|warden&cam=cockpit|chase|orbit|free&t=<seconds>&walk=<-1..1>&turn=<rad/s>&fire=<group mask>&mode=instant|range|none&pos=x,y,z&look=x,y,z&debug=1`
 - `t` fast-forwards the sim **and the gait** to that time, then freezes, giving deterministic screenshots of walking poses.
 - `walk`, `turn` and `fire` are a debug autopilot for the player. `fire=7` holds groups 1–3 and auto-aims at the nearest enemy, e.g. `scene=desert&fire=7&t=4` for a frozen firefight.
 - `mode`: `instant` (Instant Action waves, the desert default), `range` (static/patrolling dummies, the test default), or `none` (the viewer default).
@@ -63,7 +63,7 @@ The user loved the hills. The reference shows:
   - Fire groups: LMB/1 = group 1, RMB/2 = group 2, MMB/Q/3 = group 3, 4–5 = groups 4–5. F = alpha strike.
   - Mouse wheel selects a group; T toggles chain fire for it; Tab opens group config (arrows + 1–5).
   - E = target, O = override, C = coolant, R = redeploy after death, M = mute.
-  - V = chase/cockpit view, F1 = free camera, F3 = stats.
+  - V = cockpit/chase view (cockpit is the default), F1 = free camera (F1 again returns to the last piloting view), F3 = stats.
 
 ## Commands
 - `npm run dev`: dev server at http://localhost:5173/
@@ -106,7 +106,7 @@ The user loved the hills. The reference shows:
 - [ ] **M8 Polish & scale:** procedural Web Audio sound, gamepad, settings, LOD and terrain streaming, AI update rates for distant units
 
 ## Current state
-- M0–M3 and M4a are done. `npm run verify` is green: 68 unit tests and 5 e2e tests.
+- M0–M3 and M4a are done. `npm run verify` is green: 78 unit tests and 5 e2e tests.
 - **AI** (`src/sim/ai/mechBrain.ts`): deterministic and issues normal `MechCommand`s (no cheating).
   - Picks the nearest enemy (radar knowledge) with sticky targeting.
   - Closes to a loadout-derived preferred range (`preferredRange`), then circle-strafes; backs off when too close.
@@ -118,10 +118,13 @@ The user loved the hills. The reference shows:
 - **HUD:** objectives panel at top right (concept-art style), radar at bottom centre (rotates with the view; shows the legs heading), mission-failed screen. The FPS counter moved under the title.
 - **Performance:** mech paint is baked into vertex colours (`mergeByMaterial` in `kit.ts`): one mesh per joint plus emissive parts. That's about 40% fewer draw calls (a single mech went from 97 to 51).
 - **Fix:** mech movement measures climbable grade over a 4 m look-ahead (`LOOKAHEAD` in `mech.ts`), so mechs step over small bumps instead of sticking on them.
+- **Cockpit-first:** the cockpit is the default view (user request). F1 and respawn return to the last piloting view (`pilotMode` in `game.ts`).
+- **Giant gait** (`src/render/mechs/gait.ts`): cadence-driven. Feet alternate on a beat of `stride / speed` (clamped to `minInterval..maxInterval`). A planted foot stays down only while the body passes within ±`reach` of it, so at speed each swing outlasts the beat and the mech bounds with a flight phase (Ironclaw at 64 km/h: a footfall every 0.68 s, 12 m strides, ~32% airborne; it was 0.36 s steps). The body arcs (peak mid-flight, trough mid-stance, tuned by `leap`), and a slow landing spring (`impact`) compresses it. `MechView.maxHipY` lowers the pelvis so a planted leg can always reach its foot, eased so it never jumps (the cockpit rides on it). Swing motion uses a Hermite curve that lifts off at body speed and lands at zero velocity.
+- **Hit reaction ("reel")** is in the sim (`Mech.hitReaction`, `MechKinematics.reel*`/`knock*`, `HIT_REACTION` in `combat.ts`). Each hit adds a torso jolt on an underdamped spring (pitch back, twist on side-torso hits, lean away) plus knockback, scaled by damage, delivery type and 50/tonnage. Missiles slam (large per-damage impulse, all at once), shells and PPC bolts knock, beams push steadily over the burn. The reel offsets the aim ray and torso cone, for the AI too. Render: torso nodes apply the reel and the cockpit camera inherits it. Screen shake now comes only from missile, shell and MG impacts, not lasers.
 - **Repo:** https://github.com/staudt/hardpoint (public, branch `main`). **Live build:** https://staudt.github.io/hardpoint/, deployed by `.github/workflows/deploy.yml` on every push to `main` after CI passes. The user approved committing and pushing on 2026-10-20; still confirm before force-pushes or other destructive git operations.
 
 ## Next steps
-1. **Get the user's feedback** on AI difficulty, wave pacing, heat and sound.
+1. **Get the user's feedback** on the new giant gait (cadence, leap height, landing jolt), hit reel strength, and the cockpit-first view; then AI difficulty and wave pacing.
 2. **M4b vehicles:**
    - Generalise the unit model: per-chassis location sets, `movement: 'legs' | 'tracked' | 'static'`, 360° turrets. Then tanks (hull/turret/track locations; tracks destroyed = immobile) and turrets (static, for outpost defence).
    - Vehicle AI (hull-down, kiting); mixed waves.
@@ -130,7 +133,7 @@ The user loved the hills. The reference shows:
    - Jets milestone.
    - Heavy kinetic weapons and melee (`docs/design/ideas.md`).
    - Climbable paths up buttes; unit decals.
-   - Arm pitch, cockpit interior, footfall dust.
+   - Arm pitch, cockpit interior (now the main view, so higher priority), footfall dust.
    - Removing old wrecks after a while (perf in long sessions).
 
 ## Known issues
@@ -158,3 +161,6 @@ The user loved the hills. The reference shows:
 - 2026-10-19: missile heat lowered at the user's request (ammo is their cost): SRM-6 4→2, LRM-15 5→2.
 - 2026-10-20: AI pathfinding uses a coarse nav grid plus A* (`NavGrid`) rather than local wall-following, which dithered at butte faces. It's reusable for tanks and urban maps.
 - 2026-10-20: game modes via the `mode` URL param (`instant`, `range`, `none`), replacing `dummies`.
+- 2026-10-24: the cockpit is the default view (user: prioritise the cabin view over external).
+- 2026-10-24: the user wants giant, leaping strides at the same speed: a cadence gait with a flight phase, slower steps, heavier landings. Gait tuning per chassis: `reach`, `stride`, `minInterval`/`maxInterval`, `stepHeight`/`leapHeight`, `bob`/`leap`, `sway`.
+- 2026-10-24: hit reactions live in the sim (deterministic, they affect aim) rather than being camera-only: missiles reel you back like an explosion, lasers push gently.

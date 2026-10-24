@@ -33,13 +33,20 @@ export interface GaitTuning {
   spread: number;
   /** Neutral foot position forward of the hip socket line (m). */
   forward: number;
-  /** Max forward/back foot offset from neutral during a stride (m). */
+  /** Max forward/back offset of a *planted* foot from neutral (m): limited by leg length. */
   reach: number;
+  /** Body travel per footfall (m). Long strides = a slow, heavy cadence. */
+  stride: number;
+  /** Fastest and slowest time between footfalls (s). */
+  minInterval: number;
+  maxInterval: number;
+  /** Foot lift when walking (m), plus `leapHeight` at full flight. */
   stepHeight: number;
-  minStepTime: number;
-  maxStepTime: number;
-  /** Vertical body bob amplitude at full speed (m). */
+  leapHeight: number;
+  /** Walking body bob, peak to peak (m). */
   bob: number;
+  /** Leaping body rise, peak to peak (m): up through the flight, down into the landing. */
+  leap: number;
   /** Body roll toward the stance foot (rad). */
   sway: number;
 }

@@ -131,12 +131,15 @@ export function buildIronclaw(paint: Paint = makePaint({ armor: 0x8c8752, armorD
     gait: {
       spread: HIP_X + 0.15,
       forward: 0.3,
-      reach: 3.3,
+      reach: 4.5,
+      stride: 12,
+      minInterval: 0.6,
+      maxInterval: 1.05,
       stepHeight: 1.1,
-      minStepTime: 0.36,
-      maxStepTime: 0.72,
-      bob: 0.32,
-      sway: 0.035,
+      leapHeight: 0.9,
+      bob: 0.3,
+      leap: 0.75,
+      sway: 0.04,
     },
   };
 }

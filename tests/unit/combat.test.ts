@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IRONCLAW, WARDEN, type ChassisDef } from '../../src/data/chassis';
+import { HIT_REACTION } from '../../src/sim/combat/combat';
 import { applyDamage, type DamageContext } from '../../src/sim/combat/damage';
 import { rayBox, raycastTerrain, rayMech } from '../../src/sim/combat/raycast';
 import { IDLE_COMMAND, type Mech } from '../../src/sim/mech';
@@ -184,5 +185,82 @@ describe('weapons hit', () => {
       return { a: a.combat.armor, b: b.combat.armor, ha: a.combat.heat, hb: b.combat.heat, n: world.combat.projectiles.length };
     };
     expect(sim()).toEqual(sim());
+  });
+});
+
+describe('hit reaction', () => {
+  /** Peak torso reel (rad) over `seconds`, calling `each(tick)` before every step. */
+  function peakReel(world: World, m: Mech, seconds: number, each?: (tick: number) => void): number {
+    let peak = 0;
+    for (let i = 0; i < Math.round(seconds / DT); i++) {
+      each?.(i);
+      world.step(DT);
+      peak = Math.max(peak, Math.abs(m.state.reelPitch));
+    }
+    return peak;
+  }
+  // The Warden (b) faces +Z; a shot from the Ironclaw at the origin travels −Z: a hit from the front.
+  const missiles = (b: Mech, dmg: number): void => b.hitReaction(0, -1, 0, false, HIT_REACTION.srm.jolt * dmg, HIT_REACTION.srm.shove * dmg);
+
+  it('a missile volley reels the torso back, shoves the mech, then recovers', () => {
+    const { world, b } = arena();
+    const z0 = b.state.z;
+    const peak = peakReel(world, b, 0.5, (i) => i === 0 && missiles(b, 12));
+    expect(peak).toBeGreaterThan(5 * (Math.PI / 180));
+    expect(b.state.z).toBeLessThan(z0 - 0.2); // knocked back along the shot
+    run(world, 2);
+    expect(Math.abs(b.state.reelPitch)).toBeLessThan(0.005);
+  });
+
+  it('a laser burn of the same damage pushes gently instead of slamming', () => {
+    const slam = (() => {
+      const { world, b } = arena();
+      return peakReel(world, b, 1, (i) => i === 0 && missiles(b, 12));
+    })();
+    const { world, b } = arena();
+    const ticks = Math.round(0.7 / DT);
+    const perTick = 12 / ticks;
+    let firstTick = 0;
+    const push = peakReel(world, b, 1, (i) => {
+      if (i < ticks) b.hitReaction(0, -1, 0, false, HIT_REACTION.beam.jolt * perTick, HIT_REACTION.beam.shove * perTick);
+      if (i === 1) firstTick = b.state.reelPitch;
+    });
+    expect(push).toBeGreaterThan(0.01);
+    expect(slam).toBeGreaterThan(push * 1.5);
+    expect(firstTick).toBeLessThan(push * 0.1); // builds up over the burn
+  });
+
+  it('side hits twist and lean the torso; heavier mechs reel less', () => {
+    const { world, a, b } = arena();
+    b.hitReaction(0, -1, -1, false, 1, 0); // left torso, from the front
+    world.step(DT);
+    expect(b.state.reelYaw).toBeGreaterThan(0); // left side shoved back: twists left
+    // Same hit on both chassis: the 75 t Ironclaw moves less than the 50 t Warden.
+    a.hitReaction(0, 1, 0, false, 1, 0);
+    b.hitReaction(0, -1, 0, false, 1, 0);
+    world.step(DT);
+    expect(a.state.reelVPitch).toBeLessThan(b.state.reelVPitch);
+    // A push from the side leans the torso away from it.
+    const side = arena().b;
+    side.hitReaction(1, 0, 0, false, 1, 0); // pushed toward +X = the Warden's left (it faces +Z)
+    expect(side.state.reelVRoll).toBeGreaterThan(0);
+  });
+
+  it('incoming SRMs knock the target back and throw its aim off', () => {
+    const { world, a, b } = arena(IRONCLAW, 150);
+    const pitch = Math.atan2(IRONCLAW.eyeHeight * 0.8 - WARDEN.eyeHeight, 150);
+    a.command = { ...IDLE_COMMAND };
+    b.command = { ...IDLE_COMMAND, aimYaw: Math.PI, aimPitch: pitch, fire: 0b100 };
+    world.step(DT);
+    b.command = { ...IDLE_COMMAND, aimYaw: Math.PI, aimPitch: pitch };
+    let aimShift = 0;
+    const peak = peakReel(world, a, 2, () => {
+      const p = a.combat.aimPoint;
+      aimShift = Math.max(aimShift, Math.abs(p.y - (a.state.y + IRONCLAW.eyeHeight)));
+    });
+    expect(world.combat.events.some((e) => e.type === 'impact' && e.mechId === a.id)).toBe(true);
+    expect(peak).toBeGreaterThan(0.02);
+    expect(a.state.z).toBeGreaterThan(0.05); // shoved toward +Z, away from the shooter
+    expect(aimShift).toBeGreaterThan(5); // the reel lifted the aim point metres off at range
   });
 });

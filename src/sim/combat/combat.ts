@@ -60,6 +60,21 @@ const HEAT_PER_SINK = 0.1; // heat units per second per sink
 const SHUTDOWN_MIN = 4;
 const LRM_LOFT = 0.45;
 
+/**
+ * Hit reaction per point of damage on a 50 t mech: torso jolt (rad/s) and knockback (m/s).
+ * Beams deliver theirs a tick at a time over the burn, so they push steadily; missiles and
+ * shells land all at once, so they slam the torso back.
+ */
+export const HIT_REACTION: Record<Delivery, { jolt: number; shove: number }> = {
+  beam: { jolt: 0.25, shove: 0.1 },
+  stream: { jolt: 0.12, shove: 0.03 },
+  bolt: { jolt: 0.08, shove: 0.12 },
+  shell: { jolt: 0.08, shove: 0.15 },
+  srm: { jolt: 0.15, shove: 0.3 },
+  lrm: { jolt: 0.15, shove: 0.3 },
+};
+const SIDE: Partial<Record<HitLocation, number>> = { la: -1, lt: -1, ll: -1, ra: 1, rt: 1, rl: 1 };
+
 const _o = v3();
 const _d = v3();
 const _fwd = v3();
@@ -133,7 +148,8 @@ export class Combat {
   private updateAim(world: CombatWorld, m: Mech): void {
     const s = m.state;
     set3(_o, s.x, s.y + m.def.eyeHeight, s.z);
-    dirFromAngles(m.command.aimYaw, m.command.aimPitch, _d);
+    // A reeling torso drags the aim with it until it recovers.
+    dirFromAngles(m.command.aimYaw + s.reelYaw, m.command.aimPitch + s.reelPitch, _d);
     const t = this.raycast(world, _o, _d, AIM_RANGE, m.id).t;
     set3(m.combat.aimPoint, _o.x + _d.x * t, _o.y + _d.y * t, _o.z + _d.z * t);
   }
@@ -196,7 +212,7 @@ export class Combat {
     localToWorld(s, s.torsoYaw, mz[0], mz[1], mz[2], pos);
     const ap = m.combat.aimPoint;
     normalize3(set3(dir, ap.x - pos.x, ap.y - pos.y, ap.z - pos.z));
-    dirFromAngles(s.torsoYaw, s.torsoPitch, _fwd);
+    dirFromAngles(s.torsoYaw + s.reelYaw, s.torsoPitch + s.reelPitch, _fwd);
     clampCone(dir, _fwd, w.location === 'la' || w.location === 'ra' ? ARM_CONE : TORSO_CONE);
     const h = m.combat.heatFrac;
     if (wobble && h > 0.7) {
@@ -277,7 +293,7 @@ export class Combat {
       b.hitMech = hit.mech ? hit.mech.id : 0;
       if (hit.mech && hit.loc) {
         const dmg = b.dps * Math.min(dt, b.left) * rangeFactor(w.def, hit.t);
-        this.hitMech(world, hit.mech, hit.loc, dmg, owner.id, b.from);
+        this.hitMech(world, hit.mech, hit.loc, dmg, owner.id, b.from, 'beam', _d);
       }
       b.left -= dt;
     }
@@ -298,7 +314,7 @@ export class Combat {
         const def = world.mechs.find((m) => m.id === p.owner)?.combat.weapons[p.weapon]?.def;
         const factor = def ? rangeFactor(def, p.traveled + hit.t) : 1;
         const dmg = p.damage * factor;
-        if (hit.mech && hit.loc && dmg > 0) this.hitMech(world, hit.mech, hit.loc, dmg, p.owner, p.prev);
+        if (hit.mech && hit.loc && dmg > 0) this.hitMech(world, hit.mech, hit.loc, dmg, p.owner, p.prev, p.kind, _d);
         this.events.push({ type: 'impact', weaponId: p.weaponId, x: at.x, y: at.y, z: at.z, mechId: hit.mech?.id ?? 0, loc: hit.loc, damage: dmg });
         copy3(p.pos, at);
         this.projectiles.splice(i, 1);
@@ -336,8 +352,14 @@ export class Combat {
   }
 
   // ---------------------------------------------------------------- helpers
-  private hitMech(world: CombatWorld, target: Mech, loc: HitLocation, dmg: number, attackerId: number, from: Vec3): void {
+  /** `dir`: travel direction of the shot (unit), which is the way the hit pushes. */
+  private hitMech(world: CombatWorld, target: Mech, loc: HitLocation, dmg: number, attackerId: number, from: Vec3, kind: Delivery, dir: Vec3): void {
     target.combat.lastHitFrom = normalize3(v3(from.x - target.state.x, 0, from.z - target.state.z));
+    const h = Math.hypot(dir.x, dir.z);
+    if (h > 1e-6) {
+      const r = HIT_REACTION[kind];
+      target.hitReaction(dir.x / h, dir.z / h, SIDE[loc] ?? 0, loc === 'll' || loc === 'rl', r.jolt * dmg, r.shove * dmg);
+    }
     applyDamage(target, loc, dmg, this.ctx(world, attackerId));
   }
 

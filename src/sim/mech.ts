@@ -43,7 +43,27 @@ export interface MechKinematics {
   speed: number;
   /** Total distance walked (m). */
   odometer: number;
+  /**
+   * Hit reaction: the torso knocked off its aim (rad), springing back. Added on
+   * top of torsoYaw/torsoPitch for the visuals and for where the weapons point.
+   * Pitch > 0 = reeled back (nose up), yaw > 0 = twisted left, roll > 0 = leaning left.
+   */
+  reelPitch: number;
+  reelYaw: number;
+  reelRoll: number;
+  reelVPitch: number;
+  reelVYaw: number;
+  reelVRoll: number;
+  /** Knockback velocity (m/s, world), decaying. */
+  knockX: number;
+  knockZ: number;
 }
+
+/** Reel spring: stiffness (1/s²) and damping (1/s) — underdamped, so a hard hit overshoots a little. */
+const REEL_K = 70;
+const REEL_C = 10;
+const REEL_MAX = 0.3;
+const KNOCK_DECAY = 5;
 
 export function copyKinematics(src: MechKinematics, dst: MechKinematics): MechKinematics {
   dst.x = src.x;
@@ -54,6 +74,14 @@ export function copyKinematics(src: MechKinematics, dst: MechKinematics): MechKi
   dst.torsoPitch = src.torsoPitch;
   dst.speed = src.speed;
   dst.odometer = src.odometer;
+  dst.reelPitch = src.reelPitch;
+  dst.reelYaw = src.reelYaw;
+  dst.reelRoll = src.reelRoll;
+  dst.reelVPitch = src.reelVPitch;
+  dst.reelVYaw = src.reelVYaw;
+  dst.reelVRoll = src.reelVRoll;
+  dst.knockX = src.knockX;
+  dst.knockZ = src.knockZ;
   return dst;
 }
 
@@ -74,7 +102,10 @@ export class Mech {
     readonly team = 0,
   ) {
     this.combat = new MechCombat(def);
-    this.state = { x, y: terrain.heightAt(x, z), z, legYaw: yaw, torsoYaw: yaw, torsoPitch: 0, speed: 0, odometer: 0 };
+    this.state = {
+      x, y: terrain.heightAt(x, z), z, legYaw: yaw, torsoYaw: yaw, torsoPitch: 0, speed: 0, odometer: 0,
+      reelPitch: 0, reelYaw: 0, reelRoll: 0, reelVPitch: 0, reelVYaw: 0, reelVRoll: 0, knockX: 0, knockZ: 0,
+    };
     this.prev = copyKinematics(this.state, {} as MechKinematics);
     this.command.aimYaw = yaw;
   }
@@ -82,6 +113,54 @@ export class Mech {
   /** Twist of the torso relative to the legs (rad). */
   get twist(): number {
     return angleDiff(this.state.legYaw, this.state.torsoYaw);
+  }
+
+  /**
+   * Hit reaction. (fx, fz): unit horizontal direction the hit pushes. `side`: which
+   * side of the torso was struck (−1 left, +1 right, 0 centre); `low`: a leg hit.
+   * `jolt` (rad/s) kicks the torso off its aim; `shove` (m/s) knocks the mech back.
+   * Both are for a 50 t mech and scale down with tonnage.
+   */
+  hitReaction(fx: number, fz: number, side: number, low: boolean, jolt: number, shove: number): void {
+    const s = this.state;
+    const mass = this.def.tonnage / 50;
+    const j = jolt / mass;
+    // The push in the torso's frame: `back` > 0 when hit from the front, `right` > 0 when pushed rightward.
+    const back = -(fx * forwardX(s.torsoYaw) + fz * forwardZ(s.torsoYaw));
+    const right = fx * Math.cos(s.torsoYaw) - fz * Math.sin(s.torsoYaw);
+    s.reelVPitch += j * back * (low ? 0.5 : 1);
+    s.reelVYaw += j * back * -side * 0.5;
+    s.reelVRoll -= j * right * 0.6;
+    s.knockX += (fx * shove) / mass;
+    s.knockZ += (fz * shove) / mass;
+  }
+
+  private stepReel(dt: number, terrain: HeightField): void {
+    const s = this.state;
+    s.reelVPitch += (-REEL_K * s.reelPitch - REEL_C * s.reelVPitch) * dt;
+    s.reelVYaw += (-REEL_K * s.reelYaw - REEL_C * s.reelVYaw) * dt;
+    s.reelVRoll += (-REEL_K * s.reelRoll - REEL_C * s.reelVRoll) * dt;
+    s.reelPitch = clamp(s.reelPitch + s.reelVPitch * dt, -REEL_MAX, REEL_MAX);
+    s.reelYaw = clamp(s.reelYaw + s.reelVYaw * dt, -REEL_MAX, REEL_MAX);
+    s.reelRoll = clamp(s.reelRoll + s.reelVRoll * dt, -REEL_MAX, REEL_MAX);
+
+    const k = Math.hypot(s.knockX, s.knockZ);
+    if (k < 1e-3) {
+      s.knockX = s.knockZ = 0;
+      return;
+    }
+    // Knockback slides the mech, but never up a cliff or off the map.
+    const nx = s.x + s.knockX * dt;
+    const nz = s.z + s.knockZ * dt;
+    const lim = terrain.halfSize - 50;
+    const grade = (terrain.heightAt(s.x + (s.knockX / k) * LOOKAHEAD, s.z + (s.knockZ / k) * LOOKAHEAD) - s.y) / LOOKAHEAD;
+    if (grade <= this.def.maxGrade && Math.abs(nx) <= lim && Math.abs(nz) <= lim) {
+      s.x = nx;
+      s.z = nz;
+    }
+    const decay = Math.exp(-KNOCK_DECAY * dt);
+    s.knockX *= decay;
+    s.knockZ *= decay;
   }
 
   step(dt: number, terrain: HeightField): void {
@@ -95,6 +174,7 @@ export class Mech {
       s.speed = 0;
       return;
     }
+    this.stepReel(dt, terrain);
 
     // Torso tracks the aim at its twist rate, limited relative to the legs.
     s.torsoYaw = approachAngle(s.torsoYaw, cmd.aimYaw, d.twistRate * dt);

@@ -33,7 +33,7 @@ export type Vec3 = [number, number, number];
 export const DEFAULT_PARAMS: GameParams = {
   scene: 'desert',
   seed: 1,
-  cam: 'chase',
+  cam: 'cockpit',
   freezeAt: null,
   debug: false,
   camPos: null,

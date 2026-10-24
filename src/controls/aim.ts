@@ -35,7 +35,7 @@ export function aimFromCamera(world: World, mech: Mech, camPos: Vec3, look: Vec3
 export function torsoAimPoint(world: World, mech: Mech, out: Vec3): Vec3 {
   const s = mech.state;
   set3(_o, s.x, s.y + mech.def.eyeHeight, s.z);
-  dirFromAngles(s.torsoYaw, s.torsoPitch, _d);
+  dirFromAngles(s.torsoYaw + s.reelYaw, s.torsoPitch + s.reelPitch, _d);
   const t = world.combat.raycast(world, _o, _d, AIM_RANGE, mech.id).t;
   return set3(out, _o.x + _d.x * t, _o.y + _d.y * t, _o.z + _d.z * t);
 }
