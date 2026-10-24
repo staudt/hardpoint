@@ -14,6 +14,8 @@ interface Foot {
   duration: number;
   /** Lift-off speed of the swing curve (0 = ease in from rest; ~1 = leaves at body speed). */
   launch: number;
+  /** A stride while moving (re-timed to the current speed), not a standing shuffle. */
+  paced: boolean;
 }
 
 /**
@@ -46,7 +48,7 @@ export class Gait {
   onFootfall: ((foot: number, strength: number) => void) | null = null;
 
   constructor(private readonly tune: GaitTuning) {
-    const mk = (): Foot => ({ pos: new THREE.Vector3(), yaw: 0, from: new THREE.Vector3(), fromYaw: 0, t: -1, duration: 1, launch: 0 });
+    const mk = (): Foot => ({ pos: new THREE.Vector3(), yaw: 0, from: new THREE.Vector3(), fromYaw: 0, t: -1, duration: 1, launch: 0, paced: false });
     this.feet = [mk(), mk()];
   }
 
@@ -93,13 +95,14 @@ export class Gait {
       out.y = ground(out.x, out.z);
       return out;
     };
-    const lift = (i: number, duration: number, launch: number): void => {
+    const lift = (i: number, duration: number, launch: number, paced: boolean): void => {
       const f = this.feet[i]!;
       f.from.copy(f.pos);
       f.fromYaw = f.yaw;
       f.t = 0;
       f.duration = duration;
       f.launch = launch;
+      f.paced = paced;
       this.last = i;
       this.beat = 0;
     };
@@ -108,20 +111,28 @@ export class Gait {
     if (moving && !this.moving) this.beat = interval; // set off straight away
     this.moving = moving;
     if (moving) {
-      // On the beat, the other foot pushes off (once it has landed).
+      // On the beat, the other foot pushes off (once it has landed) — or sooner if the
+      // body has already carried it to the end of its reach, as when accelerating
+      // hard out of a slow walk. Otherwise the leg would be left stretched far behind.
       const next = 1 - this.last;
-      if (this.beat >= interval && this.feet[next]!.t < 0) {
-        lift(next, swing, Math.min(1.2, swing / (2 * interval)));
+      const f = this.feet[next]!;
+      if (f.t < 0) {
+        this.neutral(next, x, z, yaw, tmp);
+        const trail = ((tmp.x - f.pos.x) * vx + (tmp.z - f.pos.z) * vz) / speed;
+        if (this.beat >= interval || trail > tune.reach * 0.9) lift(next, swing, Math.min(1.2, swing / (2 * interval)), true);
       }
     } else if (this.feet.every((f) => f.t < 0)) {
       // Standing: reposition whichever foot lags most (turning in place, stopping).
       const err = this.feet.map((f, i) => landing(i, 0, tmp).distanceTo(f.pos) + Math.abs(angleDelta(f.yaw, yaw)) * 2);
-      if (Math.max(err[0]!, err[1]!) > 0.7) lift(err[0]! > err[1]! ? 0 : 1, tune.maxInterval * 0.8, 0);
+      if (Math.max(err[0]!, err[1]!) > 0.7) lift(err[0]! > err[1]! ? 0 : 1, tune.maxInterval * 0.8, 0, false);
     }
 
     for (let i = 0; i < 2; i++) {
       const f = this.feet[i]!;
       if (f.t < 0) continue;
+      // Strides in flight follow speed changes, so a swing launched at a walk doesn't
+      // drag on once the mech is running.
+      if (f.paced && moving) f.duration = swing;
       f.t = Math.min(1, f.t + dt / f.duration);
       const target = landing(i, (1 - f.t) * f.duration, tmp);
       const e = swingCurve(f.t, f.launch);

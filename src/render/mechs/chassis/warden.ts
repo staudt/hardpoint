@@ -124,7 +124,7 @@ export function buildWarden(paint: Paint = makePaint({ armor: 0x9a8f78, armorDar
     gait: {
       spread: 1.2,
       forward: 0.15,
-      reach: 2.6,
+      reach: 2.4,
       stride: 10.5,
       minInterval: 0.45,
       maxInterval: 0.85,
